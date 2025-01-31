@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 
-const API_KEY = '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';
-const ASSISTANT_ID = 'asst_m4TqUOwMCLSZj4IrrY1oOQ25';
+const API_KEY = process.env.REACT_APP_OPENAI_API_KEY;
+const ASSISTANT_ID = process.env.REACT_APP_ASSISTANT_ID;
 const MAX_RETRIES = 3;  // 최대 재시도 횟수
 const TIMEOUT = 60000;  // 60초 타임아웃
 
