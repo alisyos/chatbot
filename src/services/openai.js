@@ -1,14 +1,28 @@
 import OpenAI from 'openai';
 
+// 환경 변수 로딩 확인을 위한 디버깅
+console.log('All env variables:', process.env);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+
 const API_KEY = process.env.REACT_APP_OPENAI_API_KEY;
 const ASSISTANT_ID = process.env.REACT_APP_ASSISTANT_ID;
 const MAX_RETRIES = 3;  // 최대 재시도 횟수
 const TIMEOUT = 60000;  // 60초 타임아웃
 
+// API 키와 Assistant ID가 제대로 로드되었는지 확인
+console.log('Environment Variables Check:');
+console.log('API Key exists:', !!API_KEY);
+console.log('Assistant ID exists:', !!ASSISTANT_ID);
+
+// 더 자세한 디버깅 정보 출력
+console.log('Full API Key:', API_KEY);
+console.log('Full Assistant ID:', ASSISTANT_ID);
+console.log('API Key length:', API_KEY?.length);
+console.log('First 10 chars of API Key:', API_KEY?.substring(0, 10));
+
 const openai = new OpenAI({
   apiKey: API_KEY,
-  dangerouslyAllowBrowser: true,
-  baseURL: 'https://api.openai.com/v1'
+  dangerouslyAllowBrowser: true
 });
 
 let threadId = null;
@@ -18,90 +32,110 @@ console.log('Assistant ID:', ASSISTANT_ID);
 
 const generateResponse = async (message) => {
   try {
+    // 스레드 생성
     if (!threadId) {
-      const thread = await openai.beta.threads.create();
+      const response = await fetch('https://api.openai.com/v1/threads', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${API_KEY}`,
+          'Content-Type': 'application/json',
+          'OpenAI-Beta': 'assistants=v2'
+        },
+        body: JSON.stringify({})
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Thread creation error:', errorData);
+        throw new Error(`HTTP error! status: ${response.status}, message: ${JSON.stringify(errorData)}`);
+      }
+      
+      const thread = await response.json();
       threadId = thread.id;
       console.log('New thread created:', threadId);
     }
 
-    await openai.beta.threads.messages.create(threadId, {
-      role: "user",
-      content: message
+    // 메시지 추가
+    const messageResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json',
+        'OpenAI-Beta': 'assistants=v2'
+      },
+      body: JSON.stringify({
+        role: "user",
+        content: message
+      })
     });
 
-    const run = await openai.beta.threads.runs.create(threadId, {
-      assistant_id: ASSISTANT_ID
+    if (!messageResponse.ok) {
+      const errorData = await messageResponse.json();
+      console.error('Message creation error:', errorData);
+      throw new Error(`Message creation failed: ${JSON.stringify(errorData)}`);
+    }
+
+    // 실행
+    const runResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json',
+        'OpenAI-Beta': 'assistants=v2'
+      },
+      body: JSON.stringify({
+        assistant_id: ASSISTANT_ID
+      })
     });
 
-    let runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-    let retries = 0;
-    let startTime = Date.now();
+    if (!runResponse.ok) {
+      const errorData = await runResponse.json();
+      console.error('Run creation error:', errorData);
+      throw new Error(`Run creation failed: ${JSON.stringify(errorData)}`);
+    }
+
+    const run = await runResponse.json();
     
-    while (runStatus.status !== 'completed') {
-      // 상태 확인 간격을 동적으로 조정
-      const delay = runStatus.status === 'in_progress' ? 1000 : 2000;
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      runStatus = await openai.beta.threads.runs.retrieve(threadId, run.id);
-      
-      // 오류 상태 처리
-      if (runStatus.status === 'failed' || runStatus.status === 'cancelled') {
-        if (retries < MAX_RETRIES) {
-          console.log(`Retrying... Attempt ${retries + 1} of ${MAX_RETRIES}`);
-          retries++;
-          // 새로운 실행 시작
-          const newRun = await openai.beta.threads.runs.create(threadId, {
-            assistant_id: ASSISTANT_ID
-          });
-          run.id = newRun.id;
-          runStatus = newRun;
-          continue;
+    // 실행 상태 확인
+    let runStatus = null;
+    do {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const statusResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${run.id}`, {
+        headers: {
+          'Authorization': `Bearer ${API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2'
         }
-        throw new Error(`Assistant run ${runStatus.status}`);
+      });
+      
+      if (!statusResponse.ok) {
+        const errorData = await statusResponse.json();
+        console.error('Status check error:', errorData);
+        throw new Error(`Status check failed: ${JSON.stringify(errorData)}`);
       }
 
-      // 타임아웃 체크
-      if (Date.now() - startTime > TIMEOUT) {
-        throw new Error('Response timeout');
-      }
+      runStatus = await statusResponse.json();
+    } while (runStatus.status !== 'completed');
 
-      // requires_action 상태 처리
-      if (runStatus.status === 'requires_action') {
-        // 필요한 경우 여기에 추가 작업 처리 로직 구현
-        console.log('Action required:', runStatus.required_action);
+    // 메시지 가져오기
+    const messagesResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'OpenAI-Beta': 'assistants=v2'
       }
-    }
-
-    // 완료된 메시지 가져오기
-    const messages = await openai.beta.threads.messages.list(threadId);
+    });
     
-    if (!messages.data.length || !messages.data[0].content.length) {
-      throw new Error('Empty response received');
+    if (!messagesResponse.ok) {
+      const errorData = await messagesResponse.json();
+      console.error('Messages retrieval error:', errorData);
+      throw new Error(`Messages retrieval failed: ${JSON.stringify(errorData)}`);
     }
 
-    const lastMessage = messages.data[0];
-    let response = lastMessage.content[0].text.value;
-
-    // 출처 정보 제거
-    response = response.replace(/【[^】]*】/g, '');
-    
-    // 끝에 있을 수 있는 마침표 확인 및 추가
-    if (!response.endsWith('.') && !response.endsWith('?') && !response.endsWith('!')) {
-      response = response + '.';
-    }
-
-    // 응답이 특정 문구로 끝나는지 확인
-    if (response.endsWith('조금만 기다려 주세요.') || 
-        response.endsWith('잠시만 기다려주세요.')) {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      return await generateResponse('이어서 답변해 주세요.');
-    }
-
-    return response;
+    const messages = await messagesResponse.json();
+    return messages.data[0].content[0].text.value;
 
   } catch (error) {
     console.error('OpenAI API 오류:', error);
-    return '죄송합니다. 오류가 발생했습니다. 다시 시도해 주세요.';
+    return '죄송합니다. 오류가 발생했습니다: ' + error.message;
   }
 };
 
