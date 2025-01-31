@@ -7,7 +7,8 @@ const TIMEOUT = 60000;  // 60초 타임아웃
 
 const openai = new OpenAI({
   apiKey: API_KEY,
-  dangerouslyAllowBrowser: true
+  dangerouslyAllowBrowser: true,
+  baseURL: 'https://api.openai.com/v1'
 });
 
 let threadId = null;
