@@ -131,7 +131,12 @@ const generateResponse = async (message) => {
     }
 
     const messages = await messagesResponse.json();
-    return messages.data[0].content[0].text.value;
+    // 출처 정보와 시간 정보 제거
+    let response = messages.data[0].content[0].text.value;
+    response = response.replace(/【[^】]+】/g, '');  // 모든 【...】 패턴 제거
+    response = response.replace(/오후 \d{2}:\d{2}/g, '');  // 시간 정보 제거
+    response = response.trim();  // 앞뒤 공백 제거
+    return response;
 
   } catch (error) {
     console.error('OpenAI API 오류:', error);
