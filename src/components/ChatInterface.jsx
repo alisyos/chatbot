@@ -250,6 +250,12 @@ const ChatInterface = () => {
     }
   };
 
+  // 현재 날짜를 가져오는 함수
+  const getCurrentDate = () => {
+    const options = { month: 'long', day: 'numeric', year: 'numeric' };
+    return new Date().toLocaleDateString('en-US', options);
+  };
+
   return (
     <Container>
       <Header>
@@ -257,7 +263,7 @@ const ChatInterface = () => {
           <Avatar />
           <HeaderText>
             <Title>AIWEB CHATBOT</Title>
-            <Timestamp>October 15, 2024</Timestamp>
+            <Timestamp>{getCurrentDate()}</Timestamp>
           </HeaderText>
         </HeaderLeft>
         <ResetButton onClick={async () => {
